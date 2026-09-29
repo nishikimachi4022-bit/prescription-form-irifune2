@@ -113,6 +113,12 @@ function rpc(name, ...args) {
   });
 }
 
+function token() {
+  const value = window.liff && liff.getIDToken();
+  if (!value) throw new Error('LINEのログインを確認できません。画面を開き直してください。');
+  return value;
+}
+
 async function init() {
   try {
     try { pending = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) { storageOK = false; }
