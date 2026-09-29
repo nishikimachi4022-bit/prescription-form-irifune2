@@ -89,7 +89,7 @@ function rpc(name, ...args) {
     const timer = setTimeout(() => {
       ctrl.abort();
       reject(new Error('通信結果を確認できませんでした。送信は続いている可能性があります。「同じ受付を再開」で確認してください。'));
-    }, 90000);
+    }, 180000);
 
     fetch(GAS_URL, {
       method: 'POST',
@@ -196,9 +196,10 @@ async function jpeg(file) {
 
     // GAS側の保存上限（JPEG実体5MB）を確実に下回るよう、
     // まず3000px以内に縮小し、必要ならJPEG品質・解像度を自動調整する。
-    const MAX_BYTES = 4.7 * 1024 * 1024;
-    let scale = Math.min(1, 3000 / Math.max(img.naturalWidth, img.naturalHeight));
-    let quality = 0.90;
+    // 通信途中で止まりにくいよう、GASの5MB保存上限より十分小さい約3MBを目標にする。
+    const MAX_BYTES = 3.0 * 1024 * 1024;
+    let scale = Math.min(1, 2800 / Math.max(img.naturalWidth, img.naturalHeight));
+    let quality = 0.88;
     let data = '';
 
     for (let attempt = 0; attempt < 8; attempt++) {
@@ -304,7 +305,21 @@ async function submit() {
     showProgress(result.savedCount, result.total);
     for (let i = 0; i < snapshot.photos.length; i++) {
       if (result.savedIndices.includes(i)) continue;
-      result = await rpc('savePrescriptionPhoto', token(), pending.id, i, snapshot.photos[i].data);
+      // 写真1枚ごとに最大3回まで再試行する。1回目がサーバー側で保存済みでも、
+      // 応答だけ途切れた場合は同じ受付番号・同じ写真として安全に再取得できる。
+      let lastError = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          result = await rpc('savePrescriptionPhoto', token(), pending.id, i, snapshot.photos[i].data);
+          lastError = null;
+          break;
+        } catch (e) {
+          lastError = e;
+          if (/^\[(INPUT|AUTH|CONFLICT)\]/.test(e.message || '') || attempt === 3) throw e;
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+      }
+      if (lastError) throw lastError;
       showProgress(result.savedCount, result.total);
     }
     showProgress(result.total, result.total, '受付を確認しています');
