@@ -193,12 +193,34 @@ async function jpeg(file) {
   try {
     img.src = url; await img.decode();
     if (!img.naturalWidth || !img.naturalHeight) throw new Error('写真を読み込めません。');
-    const scale = Math.min(1, 3000 / Math.max(img.naturalWidth, img.naturalHeight));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(img.naturalWidth * scale); canvas.height = Math.round(img.naturalHeight * scale);
-    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const data = canvas.toDataURL('image/jpeg', 0.92);
-    if (data.length > 6900000) throw new Error('写真の容量が大きすぎます。解像度を下げて再撮影してください。');
+
+    // GAS側の保存上限（JPEG実体5MB）を確実に下回るよう、
+    // まず3000px以内に縮小し、必要ならJPEG品質・解像度を自動調整する。
+    const MAX_BYTES = 4.7 * 1024 * 1024;
+    let scale = Math.min(1, 3000 / Math.max(img.naturalWidth, img.naturalHeight));
+    let quality = 0.90;
+    let data = '';
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      data = canvas.toDataURL('image/jpeg', quality);
+
+      // data URLのbase64部分から、実際のJPEGバイト数を概算する。
+      const base64 = data.split(',')[1] || '';
+      const bytes = Math.floor(base64.length * 3 / 4) - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
+      if (bytes <= MAX_BYTES) break;
+
+      if (quality > 0.65) quality -= 0.05;
+      else scale *= 0.85;
+
+      if (attempt === 7) throw new Error('写真の容量が大きすぎます。解像度を下げて再撮影してください。');
+    }
+
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
     const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
     return { data, hash };
