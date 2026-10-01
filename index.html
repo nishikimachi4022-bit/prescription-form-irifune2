@@ -612,7 +612,6 @@ try {
   const text = await res.text();
   const result = JSON.parse(text);
   if (result.result === "success") {
-    alert("処方せんの送信に成功しました");
     document.getElementById('mainForm').style.display = 'none';
     document.getElementById('successMessage').style.display = 'block';
   } else {
